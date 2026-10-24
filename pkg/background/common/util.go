@@ -32,14 +32,17 @@ func UpdateStatus(ctx context.Context, client versioned.Interface, urLister kyve
 		if latest, err = retryOrDeleteOnFailure(ctx, client, latest, 3); err != nil {
 			return nil, err
 		}
+		if latest.Status.RetryCount > 3 {
+			return nil, nil
+		}
 	}
 	new, err := client.KyvernoV2().UpdateRequests(config.KyvernoNamespace()).UpdateStatus(ctx, latest, metav1.UpdateOptions{})
 	if err != nil {
-		return ur, errors.Wrapf(err, "failed to update ur status to %s", string(state))
+		return nil, errors.Wrapf(err, "failed to update ur status to %s", string(state))
 	}
 
 	logging.V(3).Info("updated update request status", "name", name, "status", string(state), "state", new.Status.State)
-	return ur, nil
+	return new, nil
 }
 
 func ResourceSpecFromUnstructured(obj unstructured.Unstructured) kyverno.ResourceSpec {

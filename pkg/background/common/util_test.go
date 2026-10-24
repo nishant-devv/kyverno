@@ -1,9 +1,16 @@
 package common
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kyverno/kyverno/api/kyverno"
+	kyvernov2 "github.com/kyverno/kyverno/api/kyverno/v2"
+	"github.com/kyverno/kyverno/pkg/client/clientset/versioned/fake"
+	"github.com/kyverno/kyverno/pkg/config"
+	"github.com/stretchr/testify/assert"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -160,3 +167,25 @@ func TestResourceSpecFromUnstructured_EmptyObject(t *testing.T) {
 		t.Errorf("Name should be empty for empty object, got %q", result.Name)
 	}
 }
+
+func TestUpdateStatus_ExceedsRetryLimit_DeletesWithoutUpdatingStatus(t *testing.T) {
+	ur := &kyvernov2.UpdateRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "failed-ur",
+			Namespace: config.KyvernoNamespace(),
+		},
+		Status: kyvernov2.UpdateRequestStatus{
+			RetryCount: 4, // > 3, so retryOrDeleteOnFailure deletes it
+			State:      kyvernov2.Pending,
+		},
+	}
+	client := fake.NewSimpleClientset(ur)
+
+	_, err := UpdateStatus(context.Background(), client, nil, ur.GetName(), kyvernov2.Failed, "permanent failure", nil)
+	assert.NoError(t, err, "exceeding retry limit should delete UR cleanly without attempting an UpdateStatus on deleted object")
+
+	// Verify the UR was indeed deleted
+	_, getErr := client.KyvernoV2().UpdateRequests(config.KyvernoNamespace()).Get(context.Background(), ur.GetName(), metav1.GetOptions{})
+	assert.True(t, apierrors.IsNotFound(getErr), "expected UR to be deleted from store")
+}
+
